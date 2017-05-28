@@ -409,13 +409,16 @@ function _uc_messenger_affiche_horaire_validate($form, &$form_state){
 	$listeCodesPostauxAcceptes	= variable_get( 'uc_messenger_codespostaux' );
 	$codePostalSaisie 	= trim($form_state['values']['panes']['delivery']['address']['delivery_postal_code']);	
 
+dsm($form_state['values']['panes']['quotes']['quotes']['quote_option'] == LIVRAISON_NOM);
+dsm(is_numeric( $codePostalSaisie ));
+dsm(strpos( $listeCodesPostauxAcceptes, $codePostalSaisie) );
 	if( 
 		$form_state['values']['panes']['quotes']['quotes']['quote_option'] == LIVRAISON_NOM 
 		&& 
 		!( 
 			is_numeric( $codePostalSaisie ) 
 			&& 
-			strpos( $listeCodesPostauxAcceptes, $codePostalSaisie) <> FALSE
+			is_int( strpos( $listeCodesPostauxAcceptes, $codePostalSaisie) )
 		) 
 	)
 	{ form_set_error( 'delivery_postal_code' , t('Nous ne livrons que sur les villes ') . $listeCodesPostauxAcceptes );	 }
