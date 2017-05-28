@@ -314,7 +314,7 @@ function uc_messenger_uc_shipping_method() {
 		'id' 			=> 'livraison',
 		'module'  		=> 'uc_messenger',
 		'title' 		=> 'livraison',
-		'description' 	=> t('Livraison de la commande au client.'),
+		'description' 	=> t('Si vous vous faite livrer.'),
 		'operations' 	=> array(
 				        'rate' => array(
 						          'title' => t('réglage'),
