@@ -1,0 +1,28 @@
+.date-livraison-creneau .form-item {
+	display: 	inline-block;
+}
+.date-livraison-creneau .debut,
+.date-livraison-creneau .fin {
+	display: 	inline-block;
+}
+.date-livraison-creneau .debut {
+	clear: 		left;
+}
+.date-livraison-creneau .fin {
+	clear:		right;
+}
+.date-livraison-creneau.debut {
+	margin-right:2em;
+}
+
+
+.container-inline-date .form-item  {
+	margin-right:	2em;	
+}
+form .container-inline-date > .form-item {
+	margin-bottom: 2em;
+}
+.date-livraison-creneau-jours .form-type-checkbox {
+	display: inline-block;
+	margin-right: 1em;
+}

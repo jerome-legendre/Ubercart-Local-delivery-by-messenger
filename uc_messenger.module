@@ -1,0 +1,690 @@
+<?php
+
+/**
+ * @file
+ *  Formulaire de reglage administration du module.
+ * 
+ * VARIABLES MEMORISEE:
+ * 
+ * uc_messenger_codespostaux					liste des codes postaux autorises, sepeares par des virgules
+ * uc_messenger_taux							taux de reduction/augmentation applique a la commande suivant ce mode de livraison
+ * uc_messenger_tempsPreparation				delai minimum entre la commande et la livraison
+ * uc_messenger_creneau_X_activation			ou X est le numero de creneau
+ * uc_messenger_creneau_X_debut_heure			heure de debut de creneau
+ * uc_messenger_creneau_X_debut_mn			minutes de debut de creneau
+ * uc_messenger_creneau_X_fin_heure			heure de fin de creneau
+ * uc_messenger_creneau_X_fin_mn				minutes de fin de creneau
+ * uc_messenger_creneau_X_orderMin			montant de commande minimum
+ * uc_messenger_creneau_X_jours				tableau des jours de la semaine (numero de jour) ouverts pour ce creneau
+ */
+
+
+define( 'LIVRAISON_NBRE_CRENEAU_HORAIRES'	, 2);				// Nombre de plages horaires  a traiter
+
+define( 'LIVRAISON_NBRE_RESA_JOURS'			, 2);				// 7 MAXIMUM !!!!  <<<<============ 
+																//Nombre de jours possibles de plages de reservation (en incluant aujourd'hui)
+
+define( 'LIVRAISON_SEPARATEUR_SELECT'		, '//!//');			// separe le numero de creaneau du timestamp dans le select de choix d'heure de livraison
+
+define( 'LIVRAISON_GRANULARITE'				, 15);				// ecart entre les heures proposee (en minutes)
+
+define( 'LIVRAISON_DAY_OF_WEEK_MIN'			, 1);				// premier jour de la semaine
+define( 'LIVRAISON_DAY_OF_WEEK_MAX'			, 7);				// dernier jour de la semaine
+
+
+controleDesConstantes();
+
+
+//!==========================================================================================
+//! 						FONCTIONS generales
+//==========================================================================================
+
+
+//
+// implementation de hook_init
+//
+
+function uc_messenger_init(){
+		drupal_add_css( drupal_get_path('module', 'uc_messenger') . '/css/uc_messenger.css', array('group' => JS_DEFAULT));
+}
+
+
+//
+// implementation de hook_help
+//
+
+function uc_messenger_help($path, $arg) {
+	
+  switch ($path) {
+	  
+    // Main module help for the block module
+    case 'admin/help#uc_messenger':
+      return '<p>' . t('Ce module apporte un plugin de livraison Ubercart dédié à la livraison en choisissant une date et une heure.' . '</p><p>' . '<a href="@livraison">Pour les réglages</a>.' . '</p>' , array('@livraison' => url('admin/store/settings/quotes/uc-messenger'))) ;
+
+    // Help for another path in the block module
+    case 'admin/store/settings/quotes/uc-messenger':
+      return '<p>' . t('Le taux réglé ici sera appliqué au en réduction du montant HT de la commande.') . '</p>';
+      
+  }
+  
+}
+
+
+//
+// implementation de hook_menu
+//
+
+function uc_messenger_menu() {
+	
+  $items = array();
+  $items['admin/store/settings/quotes/uc-messenger'] = array(
+	    'title' 			=> t('Livraison par coursier'),
+	    'description' 		=> t('Configurer les paramètres de livraison.'),
+	    'page callback' 	=> 'drupal_get_form',
+	    'page arguments' 	=> array('uc_messenger_settings_form'),
+	    'access arguments'	=> array('uc_messenger_administer'),
+	    'file' 				=> 'uc_messenger.admin.inc',
+  );
+
+  return $items;
+}
+
+
+//
+// implementation de hook_permission
+//
+
+function uc_messenger_permission() {
+	
+  $permissions = array();
+  $permissions['uc_messenger_administer'] = array(
+    'title' 		=> t('Administrer'),
+    'description' 	=> t('Administrer'),
+  );
+
+  return $permissions;
+}
+
+
+//
+// implementation de hook_form_alter
+//
+
+function uc_messenger_form_alter(&$form, &$form_state, $form_id){
+	
+	switch($form_id){
+		
+		case 'uc_cart_checkout_form':
+			drupal_add_js(drupal_get_path('module','uc_messenger').'/js/uc_messenger.js');		
+			$form['#validate'][] 	= '_uc_messenger_affiche_horaire_validate';	
+			$form['#submit'][] 		= '_uc_messenger_affiche_horaire_callback';	
+			break;
+			
+	}
+	
+}
+
+
+//!==========================================================================================
+//! 						CRENEAUX HORAIRES
+//==========================================================================================
+
+
+/**
+ * Retourne un tableau (utilisable dans un select ou un tableselect) de liste de valeurs possibles d'heures de livraisons
+ *
+ * @param $type
+ *   choix du type de tableau a renvoyer pour utilisation dans un 'select' ou un 'tableselect'
+ *
+ * @return
+ *   un tableau utilisable dans un form 'select' ou 'tableselect'.
+ */
+ 
+function getListeCreneaux( $type = 'select' ){ 
+
+	$listeOptions = array();
+	$tableauBrut = uc_messenger_getCreneauHoraire();
+	
+	// pour form element de type 'select'
+	if($type == 'select'){
+
+			foreach( $tableauBrut as $jourDeLaSemaine => $creneaux ) {
+				
+				$groupeJour = 0;
+				foreach($creneaux as $creneauKey => $creneauData) {
+					foreach( $creneauData['choix'] as $choixTimestamp => $choixLiteral ){
+						if( ! $groupeJour ) {
+							$groupeJour = $creneauData['jour'];
+						}
+						$listeOptions[$groupeJour][ $creneauKey . LIVRAISON_SEPARATEUR_SELECT . $choixTimestamp ] 	=  $choixLiteral;
+					}
+				}
+				$groupeJour = 0;
+			}
+			array_reverse( $listeOptions, TRUE );
+	}
+
+	// pour form element de type 'tableselect'
+	if($type == 'tableselect'){
+
+		$listeOptions['header'] = array(
+			'jour' 				=> t('Jour'),
+			'choix' 			=> t('heure'),
+		);
+		$listeOptions['data'] = array();	
+			
+		foreach( $tableauBrut as $jourDeLaSemaine => $creneaux ) {
+			foreach($creneaux as $creneauKey => $creneauData) {
+				foreach($creneauData['choix'] as $choixTimestamp => $choixLiteral){
+					$listeOptions['data'][$choixTimestamp] 	=  array( 
+						'jour' 		=> $creneauData['jour'],
+						'choix' 	=> $choixLiteral,
+					);
+				}
+			}
+		}
+		ksort( $listeOptions['data'], SORT_NUMERIC );
+	}
+
+	return $listeOptions;
+}
+
+/**
+ * Retourne un tableau décrivant les periodes a venir 
+ *
+ * @return
+ *   un tableau contenant les creneaux disponibles a venir sous la forme.
+ *	[7]								numero de jour de la semaine 
+ *	[7][2]							numero de creneau horaire
+ *			taux						string taux de reduction applique au mode de livraison
+ *			tempsPreparation			string delai minimum pour rendre disponible
+ *			debutHeure					string heure de debut de creneau
+ *			debutMn						string minutes de debut de creneau
+ *			finHeure					string heure de fin de creneau
+ *			finMn						string minutes de fin de creneau
+ *			orderMin					string montant de commande minimum
+ *			timestampDEBUT				integer timestamp de debut de creneau
+ *			timestampFIN				integer timestamp de fin de creneau
+ *			jour						string 	denomination literale a afficher dans un formulaire
+ *	
+ */
+function uc_messenger_getCreneauHoraire(){
+
+	$incrementMinutes 	= LIVRAISON_GRANULARITE; 						// ecart en minutes entre les heures proposees
+	$incrementSecondes 	= $incrementMinutes * 60;
+	$lesCreneaux 		= array();
+	$NUMcreneauHoraire 	= 1;
+	$maintenant 		= time();
+	$aujourdhuiJour		= date("N", $maintenant);
+	$aujourdhuiTimestamp = mktime( 0, 0 ,0 , date("m", $maintenant), date("d",  $maintenant )  , date("Y", $maintenant));
+
+	$taux 				= variable_get( 'uc_messenger_taux');
+	$tempsPreparation 	= variable_get( 'uc_messenger_tempsPreparation');
+
+	$lesCreneaux = array();			// jour de la semaine courant	
+	
+	// chaque jour de la periode a etudier	
+	for( $indexJourTraite = 0; $indexJourTraite <= (LIVRAISON_NBRE_RESA_JOURS - 1); $indexJourTraite++) {	// on traite chaque jour a partir d'aujourd'hui
+			$jourDuCreneau = _uc_messenger_jourEcretage($aujourdhuiJour + $indexJourTraite);
+
+			// chaque creneau du jour soumis
+			for($indexCreneauJournalier = 1; $indexCreneauJournalier <= LIVRAISON_NBRE_CRENEAU_HORAIRES; $indexCreneauJournalier++) {				// on traite chaque creneau horaire du jour en cours
+				
+				// le creneau est-il actif ?
+				if( variable_get( 'uc_messenger_creneau_' . $indexCreneauJournalier . '_activation') == 1 ){
+					
+					// je jour etudie est-il actif dans ce creneau
+					if( in_array( $jourDuCreneau, variable_get( 'uc_messenger_creneau_' . $indexCreneauJournalier . '_jours')) ){																		// le creneau courant est-il ouvert ce jour courant
+						
+						// Definition des valeurs
+						$timestampJourDuCreneau = $aujourdhuiTimestamp + ( ($indexJourTraite) * 24 * 60 * 60);
+						$debutHeure 			= variable_get( 'uc_messenger_creneau_' . $indexCreneauJournalier . '_debut_heure');
+						$debutMn				= variable_get( 'uc_messenger_creneau_' . $indexCreneauJournalier . '_debut_mn');
+						$finHeure				= variable_get( 'uc_messenger_creneau_' . $indexCreneauJournalier . '_fin_heure');
+						$finMn					= variable_get( 'uc_messenger_creneau_' . $indexCreneauJournalier . '_fin_mn');
+						$orderMin				= variable_get( 'uc_messenger_creneau_' . $indexCreneauJournalier . '_orderMin');	
+						$timestampDEBUT			= mktime( $debutHeure 	, $debutMn 	, 0 ,	date("n", $timestampJourDuCreneau), date("j",	$timestampJourDuCreneau),	date("Y", $timestampJourDuCreneau));
+						$timestampFIN			= mktime( $finHeure 	, $finMn 	, 0 ,	date("n", $timestampJourDuCreneau), date("j",	$timestampJourDuCreneau),	date("Y", $timestampJourDuCreneau));
+						if( $jourDuCreneau == $aujourdhuiJour)  
+							{ $jour 			= t("Aujourd'hui") . ", " . format_date( $timestampDEBUT, 'custom', 'l d/m/Y'  );
+						}elseif( $jourDuCreneau == ($aujourdhuiJour +1) )
+							{ $jour 			= t("Demain") . ", " . format_date( $timestampDEBUT, 'custom', 'l d/m/Y'  ); 
+						}else
+							{ $jour 			= format_date( $timestampDEBUT, 'custom', 'l d/m/Y'  ); }
+
+						// inscription des valeurs si il est temps (delai de preparation respecte)
+						if(
+							(
+								( $jourDuCreneau == $aujourdhuiJour )
+								&& 	
+								( $maintenant + ($tempsPreparation * 60 ) < $timestampFIN )
+							) 
+							||
+							(
+								$jourDuCreneau != $aujourdhuiJour 
+							)
+						){
+
+							$lesChoix = array();
+							$choix = $timestampDEBUT;
+
+							while( $choix  < $timestampFIN ) {
+								if( $choix  > ( $maintenant + ($tempsPreparation * 60 )) )
+									{ $lesChoix[$choix] 	= format_date( $choix, 'custom', 'H:i'); }
+								$choix	+= $incrementSecondes;
+							}					
+
+							$lesCreneaux[ $jourDuCreneau ][$indexCreneauJournalier] = array(
+								'taux'				=> $taux,
+								'tempsPreparation' 	=> $tempsPreparation,
+								'debutHeure'		=> $debutHeure,
+								'debutMn'			=> $debutMn,
+								'finHeure'			=> $finHeure,
+								'finMn'				=> $finMn,
+								'orderMin'			=> $orderMin,	
+								'timestampDEBUT'	=> $timestampDEBUT,
+								'timestampFIN'		=> $timestampFIN,
+								'choix'				=> $lesChoix
+							);
+							$lesCreneaux[ $jourDuCreneau ][$indexCreneauJournalier]['jour'] = $jour;
+
+						}
+	
+						
+					}
+				}
+			}
+
+	}
+	return $lesCreneaux;
+}
+//!==========================================================================================
+//! 						SHIPPING UBERCART
+//==========================================================================================
+
+
+//
+// Implementation de hook_uc_shipping_method().
+//
+ 
+function uc_messenger_uc_shipping_method() {
+
+	$methods = array();
+	$methods['livraison'] = array(
+		'id' 			=> 'livraison',
+		'module'  		=> 'uc_messenger',
+		'title' 		=> 'livraison',
+		'description' 	=> t('Livraison de la commande au client.'),
+		'operations' 	=> array(
+				        'rate' => array(
+						          'title' => t('réglage'),
+						          'href' => 'admin/store/settings/quotes/shipping-livraison',
+				        ),			
+		),
+		'quote' 		=> array(
+						'type' => 'order',
+						'callback' => 'uc_messenger_quote',
+						'accessorials' => array( _uc_messenger_titre() ),
+		),
+		'enabled' 		=> TRUE,		
+	);
+	
+  return $methods;
+}
+
+
+/**
+ * Retourne les informations (calculees) du mode livraison
+ *
+ * @param $products
+ *   liste des produits commandes
+ * @param $details
+ *   details de l'adresse de livraison
+ * @param $method
+ *   informations sur le mode de livraison
+ *
+ * @return
+ *   un tableau utilisable par le hook_shipping_method (calcul des frais de livraison et titre).
+ */
+function uc_messenger_quote($products, $details, $method) {
+
+	$taux = variable_get('uc_messenger_taux', -10);
+	$order_id = $_SESSION['cart_order'];
+	$laCommande = uc_order_load($order_id);	
+	$lesTaxes = 0;
+	
+	foreach( $laCommande->line_items as $key => $item){
+		if(  $item['type'] == 'tax'  ){
+			$lesTaxes += $item['amount'];
+		}
+	}
+	$totalHT = $laCommande->line_items[0]['amount'] ;
+	$reduction = $taux * (($totalHT + $lesTaxes)/100);
+
+	$quotes = array();
+    $quotes[] = array(
+      'rate' 			=> $reduction,
+      'label' 			=> _uc_messenger_titre(),
+      'option_label' 	=> _uc_messenger_titre(),
+    );
+    return $quotes;
+}
+
+//!==========================================================================================
+//! 						THEME
+//==========================================================================================
+
+
+/**
+ * Themes cart items on the checkout review order page.
+ *
+ * @param $variables
+ *   An associative array containing:
+ *   - items: An associative array of cart item information containing:
+ *     - qty: Quantity in cart.
+ *     - title: Item title.
+ *     - price: Item price.
+ *     - desc: Item description.
+ *
+ * @return
+ *   A string of HTML for the page contents.
+ *
+ * @ingroup themeable
+ */
+ 
+function theme_uc_messenger_pane_cart_review($variables) {
+	dsm($variables);
+}
+
+//!==========================================================================================
+//! 						VALIDATION CHECKOUT
+//==========================================================================================
+
+
+//
+// Implementation de hook_validate.
+//
+function _uc_messenger_affiche_horaire_validate($form, &$form_state){
+
+	$listeCodesPostauxAcceptes	= variable_get( 'uc_messenger_codespostaux' );
+	$codePostalSaisie 	= trim($form_state['values']['panes']['delivery']['address']['delivery_postal_code']);	
+
+	if( 
+		$form_state['values']['panes']['quotes']['quotes']['quote_option'] == LIVRAISON_NOM 
+		&& 
+		!( 
+			is_numeric( $codePostalSaisie ) 
+			&& 
+			strpos( $listeCodesPostauxAcceptes, $codePostalSaisie) <> FALSE
+		) 
+	)
+	{ form_set_error( 'delivery_postal_code' , t('Nous ne livrons que sur les villes ') . $listeCodesPostauxAcceptes );	 }
+
+}
+
+
+//
+// Implementation de hook_submit.
+//
+function _uc_messenger_affiche_horaire_callback($form, &$form_state){
+	
+	$order_id = $_SESSION['cart_order'];
+	$laCommande = uc_order_load($order_id);	
+	
+	if ($form_state['values']['panes']['quotes']['quotes']['quote_option'] == LIVRAISON_NOM ) { 
+		$order_id = $_SESSION['cart_order'];
+		$order = uc_order_load($order_id);	
+		$order->data['LIVRAISONchoisit'] = LIVRAISON_NOM ; 
+	}else{
+		$order->data['LIVRAISONchoisit'] = '' ; 
+	}
+		
+	if( $order->data['LIVRAISONchoisit'] == LIVRAISON_NOM){
+		$creneau = _uc_messenger_extract_creneauHoraire( $form_state['values']['panes']['horaireLivraisons']['creneaux_horaire_heure'], 'creneau');
+		$orderMin = variable_get( 'uc_messenger_creneau_' . $creneau . '_orderMin');
+		if( (float) number_format( $laCommande->order_total , 2 )  < (float)$orderMin){
+			drupal_set_message('Vous devez atteindre un montant de ' . uc_currency_format( $orderMin ) . ' pour commander à cette heure', 'error');
+			drupal_goto('cart');
+		}	
+	}
+	
+}
+
+
+//!==========================================================================================
+//! 						PANNEAU HORAIRE
+//==========================================================================================
+	
+	
+//
+// Implementation de hook_uc_checkout_pane.
+// ajout d'un panneau dans le checkout
+function uc_messenger_uc_checkout_pane() {
+	
+  $panes['horaireLivraisons'] = array(
+    'callback' => 'uc_messenger_contenu_pane', 
+    'title' => t('Comment livrer votre commande ?'), 
+    'desc' => t("Collecte l'heure de passage du client et les informations pratiques."), 
+    'weight' => 1, 
+    'process' => FALSE, 
+    'collapsible' => FALSE,
+  );
+  return $panes;
+}
+
+/**
+ * callback du panneau ajoute dans le checkout du mode de livraison
+ *
+ * @param $op
+ *   operation demande
+ * @param $order
+ *   details de la commande en cours
+ * @param $form
+ *   formulaire en cours
+ * @param $form_state
+ *   formulaire en cours
+ *
+ * @return 
+ *   selon l'operation demande.
+ */
+function uc_messenger_contenu_pane($op, $order, $form = NULL, &$form_state = NULL){
+
+	switch ($op) {
+		
+		// voir le panneau (formulaire)
+		case 'view':
+		
+			$listeCreneaux = getListeCreneaux('select');
+										
+			$contents['creneaux_horaire_heure'] = array(
+					'#type' 			=> 'select', 
+					'#title'			=> 'Heure de livraison',
+					'#description' 		=> t('À quelle heure souhaitez vous venir chercher votre commande ?'), 
+					'#options'			=> $listeCreneaux,
+			);
+				
+			$contents['details_pratiques'] = array(
+			    '#theme' 		=> 'textarea', 
+			    '#type' 		=> 'textarea',         
+			    '#title' 		=> t('Commentaires'), 
+			    '#rows' 		=>	3,
+				'#description' 	=> t('Indiquez-nous les petits détails auxquels vous êtes attaché.'),       
+			    '#weight' 		=> 30,
+			);     
+			return array('contents' => $contents, 'next-button' => FALSE);	
+			break;
+			
+		// soumission du formulaire du panneau
+		case 'process':
+			$order->data['LIVRAISONactif'] 				= TRUE;
+			$order->data['LIVRAISONchoisit'] 			= $form_state['values']['panes']['quotes']['quotes']['quote_option'];			
+			$order->data['LIVRAISONcreneauHoraire'] 	= $form_state['values']['panes']['horaireLivraisons']['creneaux_horaire_heure'];
+			$order->data['LIVRAISONcommentaire'] 		= $form_state['values']['panes']['horaireLivraisons']['details_pratiques'];
+			break;
+		
+		// retour des valeurs enregistrees
+		case 'review':
+
+			$horaire 		= _uc_messenger_extract_creneauHoraire( $order->data['LIVRAISONcreneauHoraire'], 'timestamp');
+			$commentaire 	= $order->data['LIVRAISONcommentaire'];
+
+			if( $order->quote['method'] == 'livraison'){
+				return array(
+					array(
+						'title' => 'Livraison',
+						'data'	=> 'Nous vous livrons votre commande',					
+					),
+					array(
+						'title' => 'À quelle heure',
+						'data'	=> format_date( $horaire , 'long'),					
+					),			
+					array(
+						'title' => 'Votre commentaire',
+						'data'	=> $commentaire,
+					)				
+				);	
+			}
+			break;
+	}	
+}
+
+//!==========================================================================================
+//! 						MODIFICATION COMMANDE
+//==========================================================================================
+//
+// Implementation de hook_uc_order.
+//
+//													(load, total, save, total, load, total)
+
+function uc_messenger_uc_order($op, $order, $arg2) {
+
+	switch($op){
+
+		case 'load':
+			if( $order->order_status != 'in_checkout' && isset( $order->data['LIVRAISONchoisit'] ) && $order->data['LIVRAISONchoisit'] == LIVRAISON_NOM ){	
+				$order->delivery_city  	= $order->delivery_city . "\n---------------\n" . format_date( _uc_messenger_extract_creneauHoraire( $order->data['LIVRAISONcreneauHoraire'] , 'timestamp' ) , 'court') .  "\n---------------\nCommentaire du client:\n" . $order->data['LIVRAISONcommentaire'] ;
+			}
+			break;
+						
+		case 'save':		
+			break;
+			
+		case'total':
+			break;
+		
+	}
+		
+}
+
+
+//!==========================================================================================
+//! 						FONCTIONS ANNEXES
+//==========================================================================================
+
+
+/**
+ * renvoie le titre accompagne du taux si non nul.
+ *
+ * @return
+ * 		string
+ */
+function _uc_messenger_titre() {
+	$taux = variable_get('uc_messenger_taux', -10);
+	return 	$taux != 0 ?  'Livraison à domicile  ('  . $taux . ' %)' :  'Livraison à domicile';		
+}
+
+
+/**
+ * renvoie à partir d'un calcul de jour quelconque le vrai numero de jour de semaine dans la plage normale des jours
+ * en haut ou en bas (-2 = 5 vendredi, ou 9 = 2 mardi)
+ *
+ * @param $n
+ *   jour de semaine hors plage
+ *
+ * @return
+ *   int jour de la semaine.
+ */
+function _uc_messenger_jourEcretage($n){
+
+	$minPeriode 	= LIVRAISON_DAY_OF_WEEK_MIN;
+	$maxPeriode 	= LIVRAISON_DAY_OF_WEEK_MAX;
+	$periode 		= $maxPeriode - $minPeriode +1;
+
+	if( $n > $maxPeriode ) {
+		return ( $n - ( floor($n / $periode) * $periode ) );
+	}
+	if( $n < $minPeriode ){
+		return  ( $n - ( ceil($n / $periode) * $periode ) ) + $periode ;
+	}
+	return (integer) $n;
+}
+
+/**
+ * renvoie l'imformation de numero de creneau ou celle du timestamp contenu dans le string.
+ *
+ * @param $chaine
+ *   le chaine contenant les 2 infos avec separateur
+ * @param $info
+ *   laquelle des 2 infos est demandee
+ *
+ * @return
+ *   l'information demandee
+ */
+function _uc_messenger_extract_creneauHoraire( $chaine, $info){ 
+	
+			$tab 		= explode( LIVRAISON_SEPARATEUR_SELECT  , $chaine);
+			
+			if($info == 'creneau') 		{ return  $tab[0]; }
+			if($info == 'timestamp') 	{ return  $tab[1]; }		
+			
+			return FALSE;
+}
+
+
+/**
+ * effectue un controle des constantes definies en tete de fichier et applique une valeur par defaut quans hors norme.
+ *
+ * @return
+ *   void
+ */
+
+function controleDesConstantes(){
+
+	if( !is_int(LIVRAISON_NBRE_RESA_JOURS) || LIVRAISON_NBRE_RESA_JOURS > 7 ){
+		define( 'LIVRAISON_NBRE_RESA_JOURS' , 7);
+	}
+	if( !is_int(LIVRAISON_NBRE_RESA_JOURS) || LIVRAISON_NBRE_RESA_JOURS < 1 ){
+		define( 'LIVRAISON_NBRE_RESA_JOURS' , 1);		
+	}	
+	if( !is_int(LIVRAISON_NBRE_CRENEAU_HORAIRES) || LIVRAISON_NBRE_CRENEAU_HORAIRES < 1 || LIVRAISON_NBRE_CRENEAU_HORAIRES > 10 ){
+		define( 'LIVRAISON_NBRE_CRENEAU_HORAIRES' , 2);
+	}
+	if( !is_string(LIVRAISON_SEPARATEUR_SELECT) || strlen(LIVRAISON_SEPARATEUR_SELECT)  < 2 ){
+		define( 'LIVRAISON_SEPARATEUR_SELECT' , '//!//' );
+	}
+	define( 'LIVRAISON_NOM' , key(uc_messenger_uc_shipping_method()) . '---0' );
+
+	if( !is_int(LIVRAISON_GRANULARITE) || LIVRAISON_GRANULARITE > ( 24 * 60 ) ){
+		define( 'LIVRAISON_GRANULARITE' , 15);
+	}
+	if( !is_int(LIVRAISON_DAY_OF_WEEK_MIN) || LIVRAISON_DAY_OF_WEEK_MIN < 1 ){
+		define( 'LIVRAISON_DAY_OF_WEEK_MIN' , 1);
+	}
+	if( !is_int(LIVRAISON_DAY_OF_WEEK_MAX) || LIVRAISON_DAY_OF_WEEK_MAX > 7 ){
+		define( 'LIVRAISON_DAY_OF_WEEK_MAX' , 7);
+	}	
+	return;
+}
+
+
+
+
+
+
+
+
+
+/*
+define( 'LIVRAISON_NOM'						, 'livraison---0');	// chaine renvoyee par le mode de livraison choisi
+
+*/

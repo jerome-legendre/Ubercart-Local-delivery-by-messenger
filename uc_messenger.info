@@ -1,0 +1,10 @@
+name = Local delivery by messenger 
+description = Module Ubercart pour livraison locale par coursier
+dependencies[] = uc_order
+dependencies[] = uc_cart
+dependencies[] = uc_shipping
+dependencies[] = uc_quote
+
+core = 7.x
+package = Ubercart - fulfillment
+configure = admin/store/settings/quotes/uc-messenger

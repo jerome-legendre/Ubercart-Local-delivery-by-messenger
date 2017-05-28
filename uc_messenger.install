@@ -1,0 +1,35 @@
+<?php
+
+/*
+Liste des elements:
+
+VARIABLES
+lgd_uc_shipping_retrait_taux
+lgd_uc_shipping_retrait_delai
+
+*/
+
+/**
+ * Implements hook_install().
+ */
+function uc_messenger_install() {
+  $t = get_t();
+  drupal_set_message($t("Your Module settings are available under !link", 
+    array( '!link' => l($t('Administer > Shop > Configuration > Shipping > Livraison par coursier'),  'admin/store/settings/quotes/uc-messenger'))
+  ));
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function uc_messenger_uninstall() {
+/*
+  $t = get_t();
+	variable_del('uc_messenger_taux');
+	variable_del('uc_messenger_delai');
+*/
+	db_delete('variable')
+	->condition('name', 'uc_messenger_%','LIKE')
+	->execute();
+	cache_clear_all('variables', 'cache_bootstrap');	
+}
