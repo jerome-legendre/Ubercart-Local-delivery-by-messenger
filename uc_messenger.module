@@ -314,7 +314,7 @@ function uc_messenger_uc_shipping_method() {
 		'id' 			=> 'livraison',
 		'module'  		=> 'uc_messenger',
 		'title' 		=> 'livraison',
-		'description' 	=> t('Si vous vous faite livrer.'),
+		'description' 	=> t('Livraison de la commande au client.'),
 		'operations' 	=> array(
 				        'rate' => array(
 						          'title' => t('réglage'),
@@ -463,7 +463,7 @@ function uc_messenger_uc_checkout_pane() {
 	
   $panes['horaireLivraisons'] = array(
     'callback' => 'uc_messenger_contenu_pane', 
-    'title' => t('Comment livrer votre commande ?'), 
+    'title' => t('Si vous vous faite livrer'), 
     'desc' => t("Collecte l'heure de passage du client et les informations pratiques."), 
     'weight' => 1, 
     'process' => FALSE, 
