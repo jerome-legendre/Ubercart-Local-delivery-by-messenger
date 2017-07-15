@@ -318,7 +318,7 @@ function uc_messenger_uc_shipping_method() {
 		'operations' 	=> array(
 				        'rate' => array(
 						          'title' => t('réglage'),
-						          'href' => 'admin/store/settings/quotes/shipping-livraison',
+						          'href' => 'admin/store/settings/quotes/uc-messenger',
 				        ),			
 		),
 		'quote' 		=> array(
