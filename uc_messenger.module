@@ -577,6 +577,20 @@ function uc_messenger_uc_order($op, $order, $arg2) {
 		
 }
 
+//
+// Implementation de hook_mail_alter.
+//
+/*
+function uc_messenger_mail_alter(&$message){
+	if( $message['id'] == 'uc_order_action_mail' ){
+		dsm($message);
+	}
+}
+*/
+function uc_messenger_uc_invoice_templates() {
+  return array('admin', 'customer');
+}
+
 
 //!==========================================================================================
 //! 						FONCTIONS ANNEXES
